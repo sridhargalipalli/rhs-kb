@@ -1,7 +1,6 @@
+
 # RHS Registration Knowledge Base
 
-{% raw %}
-{{ site.github.pages }}
-{% endraw %}
+This page contains the authoritative KB for the RHS EMR Registration module.
 
 {% include_relative RHS_Registration_KB.md %}
