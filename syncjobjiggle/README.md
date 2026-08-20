@@ -118,7 +118,7 @@ and "succeed" while doing nothing. Keep *Run only when user is logged on* +
 | `Repair-SyncJobJiggle.ps1` | Applies the table above. Backs up first, supports `-WhatIf`. |
 | `LOG-ANALYSIS.md` | Findings from 6,253 runs in jiggle_log.txt/.prev. Start here. |
 | `original/` | The scripts as found on the machine, for reference. |
-| `fixed/` | Corrected `.vbs` (waits, propagates exit code), hardened `.bat`, and the JiggleOnce NPE guard. |
+| `fixed/` | Corrected `.vbs` (waits, propagates exit code), hardened `.bat`, and null-guarded `JiggleOnce.java`. |
 
 ## The action being launched
 

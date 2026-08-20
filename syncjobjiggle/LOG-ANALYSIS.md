@@ -166,8 +166,15 @@ Harmless.
 ## `NullPointerException` at `JiggleOnce.java:5`
 
 Twice in 6,253 runs — Tue 06/09 09:18 and Mon 06/29 17:09, the latter being the
-sole `exit=1`. `MouseInfo.getPointerInfo()` returns null rather than throwing when
-the workstation is locked. See `fixed/JiggleOnce-null-guard.md`.
+sole `exit=1`. Confirmed against the source: line 5 is
+
+```java
+Point p = MouseInfo.getPointerInfo().getLocation();
+```
+
+`MouseInfo.getPointerInfo()` returns null rather than throwing when the
+workstation is locked or the session is disconnected. `fixed/JiggleOnce.java`
+guards it and returns 0, and moves `new Robot()` below the check.
 
 ## What is actually worth changing
 
