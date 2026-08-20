@@ -116,7 +116,9 @@ and "succeed" while doing nothing. Keep *Run only when user is logged on* +
 | `Check-JiggleScript.ps1` | Read-only. Validates the VBS the task launches: existence, OneDrive placeholder state, hard-coded paths, Java version drift. `-Run` executes it visibly. |
 | `Diagnose-SyncJobJiggle.ps1` | Read-only. Dumps definition, settings, return codes, and the real 111/114 messages. |
 | `Repair-SyncJobJiggle.ps1` | Applies the table above. Backs up first, supports `-WhatIf`. |
-| `Run-Silent.vbs` | Zero-window launcher shim. Edit the script path at the top. |
+| `LOG-ANALYSIS.md` | Findings from 6,253 runs in jiggle_log.txt/.prev. Start here. |
+| `original/` | The scripts as found on the machine, for reference. |
+| `fixed/` | Corrected `.vbs` (waits, propagates exit code), hardened `.bat`, and the JiggleOnce NPE guard. |
 
 ## The action being launched
 
