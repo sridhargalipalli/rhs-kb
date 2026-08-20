@@ -113,6 +113,65 @@ and "succeed" while doing nothing. Keep *Run only when user is logged on* +
 
 | File | Purpose |
 |---|---|
+| `Check-JiggleScript.ps1` | Read-only. Validates the VBS the task launches: existence, OneDrive placeholder state, hard-coded paths, Java version drift. `-Run` executes it visibly. |
 | `Diagnose-SyncJobJiggle.ps1` | Read-only. Dumps definition, settings, return codes, and the real 111/114 messages. |
 | `Repair-SyncJobJiggle.ps1` | Applies the table above. Backs up first, supports `-WhatIf`. |
 | `Run-Silent.vbs` | Zero-window launcher shim. Edit the script path at the top. |
+
+## The action being launched
+
+```
+Program : C:\Windows\System32\wscript.exe
+Args    : "C:\Users\sridhar.galipalli\OneDrive - eClinicalWorks\Desktop\Sync\run_jiggleonce.vbs"
+Start in: (empty)
+```
+
+Quoting is correct, so the space in `OneDrive - eClinicalWorks` is handled. Two
+structural problems remain regardless of what the VBS contains:
+
+**1. The script lives inside OneDrive.** That makes the task fragile in three
+independent ways:
+
+* **Files On-Demand** can dehydrate `run_jiggleonce.vbs` into a cloud-only
+  placeholder. `wscript.exe` then blocks on a network hydration at launch — which
+  looks exactly like the Event 111 termination and Event 114 missed starts, and
+  would explain failing intermittently rather than always.
+* OneDrive can rename it into a **conflict copy** (`run_jiggleonce-DESKTOP-XYZ.vbs`),
+  leaving the task pointed at a path that no longer exists.
+* **Known Folder Move** can relocate Desktop entirely, changing the path underneath
+  the task.
+
+Fix: move the script to a plain local folder such as `C:\Tools\Sync\` and repoint
+the action there. Nothing about this script benefits from being synced.
+
+**2. "Start in" is empty.** Any relative path inside the VBS — a jar, a config, a
+log file — resolves against `C:\Windows\System32`, not the Sync folder. Set
+*Start in* to the script's folder.
+
+## The Java question
+
+If the VBS shells out to a version-numbered Java path, e.g.
+
+```vb
+sh.Run """C:\Program Files\Java\jre1.8.0_401\bin\javaw.exe"" -jar jiggle.jar", 0, True
+```
+
+then every Java update renames that folder and the launch fails — silently, because
+the window is hidden. `Check-JiggleScript.ps1` extracts each hard-coded path from
+the VBS, tests it, inventories the Java runtimes actually installed, and flags the
+mismatch.
+
+The durable fix is to stop baking the version into the path:
+
+```vb
+Dim sh  : Set sh  = CreateObject("WScript.Shell")
+Dim fso : Set fso = CreateObject("Scripting.FileSystemObject")
+Dim javaw : javaw = sh.ExpandEnvironmentStrings("%JAVA_HOME%") & "\bin\javaw.exe"
+If Not fso.FileExists(javaw) Then javaw = "javaw.exe"   ' fall back to PATH
+sh.Run """" & javaw & """ -jar ""C:\Tools\Sync\jiggle.jar""", 0, True
+```
+
+Note also that `sh.Run cmd, 0, False` (no wait) returns immediately, so the VBS
+exits while its child keeps running. Task Scheduler logs 102 *task completed*, then
+has to reap the orphan later — which is the 102-then-111 ordering seen in the
+History tab. Use `True` to wait, so the task's lifetime matches the work's.
