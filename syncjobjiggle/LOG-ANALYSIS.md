@@ -102,14 +102,15 @@ blocking on network I/O. Strongly suggestive, not proven.
 | VBS `Run(..., 0, False)` -> **`True`** | The task result is no longer pinned to 0, so failures become visible. |
 | Folder moved to **`C:\Tools\Sync`** | Removes OneDrive from the launch path entirely. |
 | `.bat` hardened | Missing-jar guard, best-effort `msg.exe`, exits with the jar's code. |
+| `JiggleOnce.jar` rebuilt | Null-guards `MouseInfo.getPointerInfo()`. Built with `--release 8` (class version 52) because the machine has a JRE but no `javac`. |
 
-Verified on 08/20: runs at 18:23, 18:33, 18:35 all `exit=0`, `LastTaskResult : 0`,
+Verified on 08/20: runs at 18:23, 18:33, 18:35 and 18:47 all `exit=0`, `LastTaskResult : 0`,
 log writing to `C:\Tools\Sync`, OneDrive copy dormant, exactly one task
 referencing the jiggler, nothing in Startup.
 
-Still open, both optional: the daily Event 111 at the end of the 9-hour window
-(cosmetic, from `StopAtDurationEnd = True`), and rebuilding the jar with the
-`MouseInfo.getPointerInfo()` null guard.
+Still open, and purely cosmetic: the daily Event 111 at the end of the 9-hour
+window, from `StopAtDurationEnd = True`. Runs take two seconds, so there is never
+anything to terminate when the window closes.
 
 ## Why some days show double the runs
 
