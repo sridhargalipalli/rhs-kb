@@ -59,20 +59,57 @@ with a `java.exe` PATH fallback, so it is already immune to version-folder
 renames. Nothing to update. (The 1,708 `Finished` lines with no `exit=` predate
 exit-code logging in the `.bat`.)
 
-## The 25-hour gap on 08/19–08/20
+## Root cause of the 08/19-08/20 outage: one hung instance
+
+Confirmed from `Microsoft-Windows-TaskScheduler/Operational` and the System
+power log.
 
 ```
-Wed 08/19  15:20:06   last run   (window would have run to 18:45)
-Thu 08/20  16:37:28   one run, exit=0
+08/19 15:20:05   100 Started        -> logged normally, exit=0
+08/19 15:24:42   114 + 100 Started  -> NO log line ever written   <-- hung here
+                 (nothing for 7 hours; the machine was awake throughout)
+08/19 22:20:38   111 Terminated     -> killed by the sleep transition at 22:20:46
+08/20 09:09:09     1 Resume
+08/20 16:37:27   100 Started        -> manual run while investigating
 ```
 
-08/19's window opened late at 09:45 and so was due to run to 18:45; it stopped at
-15:20. 08/20 produced a single run at 16:37. The shape is consistent with the
-machine being off or asleep for that whole period, with `StartWhenAvailable`
-firing the missed 09:00 start on resume at 16:37. **The logs cannot distinguish
-"machine off" from "task failed to fire"** — the System power events can, which is
-what `Diagnose-SyncJobJiggle.ps1` checks. Until that is confirmed, treat this gap
-as unexplained rather than as a defect.
+The instance started at 15:24:42 never wrote a line to `jiggle_log.txt` (the last
+08/19 entry is 15:20:06) and never produced an Event 102. Task Scheduler held it
+as *running* for six hours and fifty-six minutes.
+
+That single hang took out the rest of the day, because of two settings acting
+together:
+
+* **`MultipleInstances = IgnoreNew`** suppressed every trigger from 15:25 onward
+  while the stuck instance was still nominally running.
+* **`ExecutionTimeLimit = PT9H`** meant Task Scheduler would not have reaped it
+  until 00:24:42. It never got that far — sleep terminated it first.
+
+The power log rules out the machine being off: it booted 08/19 09:43 (matching the
+first jiggle run at 09:45) and did not sleep until 22:20.
+
+**Where the hang was.** The `.bat` writes its `Triggered` line *before* launching
+Java, and that line is absent, so the hang happened earlier than the JVM — in
+wscript launching cmd, or in cmd's first append to `jiggle_log.txt`. Every step in
+that path touched the OneDrive-backed folder, the only component there capable of
+blocking on network I/O. Strongly suggestive, not proven.
+
+## Resolution applied 08/20
+
+| Change | Effect |
+|---|---|
+| `ExecutionTimeLimit` PT9H -> **PT3M** | A hang is now reaped after 3 minutes, so it costs one cycle instead of an afternoon. This is the fix for the outage above. |
+| VBS `Run(..., 0, False)` -> **`True`** | The task result is no longer pinned to 0, so failures become visible. |
+| Folder moved to **`C:\Tools\Sync`** | Removes OneDrive from the launch path entirely. |
+| `.bat` hardened | Missing-jar guard, best-effort `msg.exe`, exits with the jar's code. |
+
+Verified on 08/20: runs at 18:23, 18:33, 18:35 all `exit=0`, `LastTaskResult : 0`,
+log writing to `C:\Tools\Sync`, OneDrive copy dormant, exactly one task
+referencing the jiggler, nothing in Startup.
+
+Still open, both optional: the daily Event 111 at the end of the 9-hour window
+(cosmetic, from `StopAtDurationEnd = True`), and rebuilding the jar with the
+`MouseInfo.getPointerInfo()` null guard.
 
 ## Why some days show double the runs
 
