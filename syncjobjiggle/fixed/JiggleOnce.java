@@ -18,3 +18,8 @@ public class JiggleOnce {
     r.mouseMove(p.x, p.y);
   }
 }
+
+// Built for distribution with:
+//   javac --release 8 -d out JiggleOnce.java
+//   jar cfm JiggleOnce.jar manifest.txt -C out .
+// Class file major version 52 (Java 8), so it runs on any JRE 8 or newer.
