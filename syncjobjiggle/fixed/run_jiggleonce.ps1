@@ -55,8 +55,14 @@ $p = Start-Process -FilePath $javaExe `
         -WorkingDirectory $dir -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $outFile -RedirectStandardError $errFile
 
+# Touch .Handle before waiting. Without this, Start-Process -PassThru returns a
+# Process object whose ExitCode reads back as $null once the process has exited,
+# and 'exit $null' becomes 0 - which would hide every failure again.
+$null = $p.Handle
+
 if ($p.WaitForExit($TimeoutSec * 1000)) {
     $code = $p.ExitCode
+    if ($null -eq $code) { $code = -1 }
 } else {
     # This is the case Task Scheduler failed to handle on 08/19 and 08/28.
     try { $p.Kill() } catch { }
