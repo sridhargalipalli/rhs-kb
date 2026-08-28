@@ -15,11 +15,11 @@ Task Scheduler  \SyncJobJiggle
               StartWhenAvailable True, Hidden True, RunOnlyIfIdle False
         |
         v
-wscript.exe "C:\Tools\Sync\run_jiggleonce.vbs"     hidden window, WAITS for the bat
+wscript.exe "C:\Tools\Sync\run_jiggleonce.vbs"     hidden window, WAITS
         |
         v
-C:\Tools\Sync\run_jiggleonce.bat                   rotates + writes jiggle_log.txt at 1 MB
-        |
+C:\Tools\Sync\run_jiggleonce.ps1                   logging, 1 MB rotation,
+        |                                           and a 60 s HARD TIMEOUT on the JVM
         v
 java -jar C:\Tools\Sync\JiggleOnce.jar             ~2 s, moves the cursor 1px and back
 ```
@@ -47,11 +47,47 @@ One hung instance cost the entire afternoon, silently.
 | `ExecutionTimeLimit` PT9H -> **PT3M** | The actual fix. A hang now costs one cycle. |
 | VBS `Run(..., 0, False)` -> **`True`** | Fire-and-forget pinned the task result to 0 forever, hiding every failure. |
 | Folder moved OneDrive -> **`C:\Tools\Sync`** | The hang preceded the first log write, i.e. in the launch path, all of which touched OneDrive. Suggestive, not proven. |
-| `.bat` hardened | Missing-jar guard, best-effort `msg.exe`, exits with the jar's code. |
+| `.bat` -> **`run_jiggleonce.ps1`** | Enforces a 60 s hard timeout on the JVM and reaps stale JiggleOnce JVMs, because Task Scheduler's own limit does not fire (see below). |
 | `JiggleOnce.jar` rebuilt | Null-guards `MouseInfo.getPointerInfo()`, which returns null (not throws) on a locked workstation. Built `--release 8`; the machine has a JRE but no `javac`. |
 
 Verified 08/20: runs at 18:23, 18:33, 18:35, 18:47 all `exit=0`,
 `LastTaskResult : 0`, OneDrive copy dormant, one task, clean Startup folder.
+
+## Second incident, 08/28 — Task Scheduler's timeout does not work here
+
+Caught live at 14:00 while an instance was still `Running`:
+
+```
+13:20:06  100 Started, 200 Action started    <- no 201, no 102
+13:20:06  java.exe pid 30404 spawned         <- STILL RUNNING 40 minutes later
+13:25 .. 14:00  Event 322 x8                 <- every trigger suppressed by IgnoreNew
+```
+
+`java.exe` was the stuck process, not wscript or cmd — the `.bat` had already
+written `Starting JiggleOnce.jar`. **`ExecutionTimeLimit = PT3M` did not fire**,
+and the task XML contains no `AllowHardTerminate` element, so it takes the schema
+default of `true` and should have force-killed at 13:23. It did not. The same
+thing happened on 08/19, where only the sleep transition ended the instance.
+
+Conclusion: **do not rely on Task Scheduler's ExecutionTimeLimit here.** The
+launcher enforces its own 60-second timeout instead (`run_jiggleonce.ps1`), which
+is why the `.bat` was retired.
+
+Two earlier conclusions were wrong and are corrected here:
+
+* The OneDrive location was **not** the cause. The hang recurred from
+  `C:\Tools\Sync`. The move was reasonable hygiene, nothing more.
+* `AllowHardTerminate` does **not** explain the failure — the element is absent,
+  which means the permissive default.
+
+## Open question
+
+**Why does the JVM wedge?** Roughly weekly, on current evidence. The 08/28 hang
+began at 13:20, around lunch, and `JiggleOnce.java` calls
+`MouseInfo.getPointerInfo()` first — a call that can block rather than return null
+on a locked desktop. Unconfirmed. The `TIMEOUT` lines the new launcher writes are
+the evidence trail; correlate their timestamps against lock/unlock events
+(Security log 4800 = lock, 4801 = unlock).
 
 ## How to check it
 
@@ -63,6 +99,8 @@ Prints PASS/WARN/FAIL lines and a verdict. Expect `HEALTHY`.
 
 ## Known, accepted, not bugs
 
+* **`TIMEOUT after 60 s` lines** are the launcher working as designed: one cycle
+  lost, next trigger normal. They are evidence to collect, not a regression.
 * **One Event 111 per day** at the end of the 9-hour window. `StopAtDurationEnd`
   is True; runs take 2 s so there is never anything to kill. Cosmetic only.
 * **Event 114 "Missed start" every 5 minutes**, each immediately followed by a
