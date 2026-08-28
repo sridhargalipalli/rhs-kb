@@ -22,6 +22,36 @@ function Write-Log($msg) {
     Add-Content -LiteralPath $log -Value "[Date: $d Time: $t] $msg"
 }
 
+# Cheap, best-effort state snapshot for correlating future hangs. Each field is
+# independently try/caught with a '?' fallback - telemetry must never fail a run.
+#
+# CIM rather than Add-Type/P-Invoke: Task Scheduler launches a fresh powershell.exe
+# every cycle, so there is no cross-process cache and Add-Type measured ~1.27 s per
+# run compiling the type. Too expensive for a 5-minute cycle.
+#
+# -OperationTimeoutSec is essential, not decoration. WmiMonitorBasicDisplayParams
+# queries the display driver, which is the very subsystem suspected of wedging.
+# try/catch cannot catch a hang, only an exception, and this runs outside the 60 s
+# JVM timeout - so without a bound here a wedged display provider would hang the
+# whole script before any log line was written, reproducing the 08/19 signature.
+function Get-JiggleState {
+    $power = '?'
+    try {
+        $bs = @(Get-CimInstance -Namespace root\wmi -ClassName BatteryStatus `
+                  -OperationTimeoutSec 5 -ErrorAction Stop)
+        if ($bs.Count -eq 0) { $power = 'AC' }          # desktop / no battery provider
+        else { $power = if ($bs[0].PowerOnline) { 'AC' } else { 'Battery' } }
+    } catch { $power = '?' }
+
+    $monitors = '?'
+    try {
+        $monitors = @(Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorBasicDisplayParams `
+                        -OperationTimeoutSec 5 -ErrorAction Stop).Count
+    } catch { $monitors = '?' }
+
+    "power=$power monitors=$monitors"
+}
+
 # --- rotate at 1 MB, same as the batch version ---------------------------------
 if ((Test-Path $log) -and (Get-Item $log).Length -ge 1MB) {
     if (Test-Path $prev) { Remove-Item $prev -Force }
@@ -30,7 +60,8 @@ if ((Test-Path $log) -and (Get-Item $log).Length -ge 1MB) {
 
 # --- reap any JiggleOnce JVM left over from an earlier cycle -------------------
 # Matched on the command line so other Java processes on the machine are untouched.
-Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue |
+Get-CimInstance Win32_Process -Filter "Name='java.exe'" `
+    -OperationTimeoutSec 5 -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like '*JiggleOnce.jar*' } |
     ForEach-Object {
         Write-Log "Killing stale JiggleOnce JVM pid $($_.ProcessId) (started $($_.CreationDate))"
@@ -54,8 +85,15 @@ if (Get-Process LogonUI -ErrorAction SilentlyContinue) {
     exit 0
 }
 
+# Triggered is logged BEFORE the state snapshot deliberately: if Get-JiggleState
+# ever wedges despite its timeouts, the log still shows the cycle began, which
+# distinguishes a telemetry hang from the pre-log hang seen on 08/19.
 Write-Log 'TaskScheduler Triggered after 5 mins idle'
-Write-Log 'Starting JiggleOnce.jar'
+
+$state = 'power=? monitors=?'
+try { $state = Get-JiggleState } catch { $state = 'power=? monitors=?' }
+
+Write-Log "Starting JiggleOnce.jar ($state)"
 
 $outFile = Join-Path $env:TEMP 'jiggle_out.txt'
 $errFile = Join-Path $env:TEMP 'jiggle_err.txt'
@@ -77,7 +115,9 @@ if ($p.WaitForExit($TimeoutSec * 1000)) {
     # This is the case Task Scheduler failed to handle on 08/19 and 08/28.
     try { $p.Kill() } catch { }
     $code = 1460                      # ERROR_TIMEOUT
-    Write-Log "TIMEOUT after $TimeoutSec s - JVM pid $($p.Id) killed"
+    $killState = 'power=? monitors=?'
+    try { $killState = Get-JiggleState } catch { $killState = 'power=? monitors=?' }
+    Write-Log "TIMEOUT after $TimeoutSec s - JVM pid $($p.Id) killed ($killState)"
 }
 
 foreach ($f in $outFile, $errFile) {
