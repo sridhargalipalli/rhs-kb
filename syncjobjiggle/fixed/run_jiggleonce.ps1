@@ -44,6 +44,16 @@ $javaExe = if ($env:JAVA_HOME -and (Test-Path "$env:JAVA_HOME\bin\java.exe")) {
     "$env:JAVA_HOME\bin\java.exe"
 } else { 'java.exe' }
 
+# LogonUI.exe is present exactly while the lock screen is up. The working theory
+# for the 08/19 and 08/28 hangs is that MouseInfo.getPointerInfo() blocks rather
+# than returning null on a locked desktop, so skip the cycle instead of risking
+# it. Jiggling an already-locked screen achieves nothing in any case.
+# If TIMEOUT lines still appear after this, the theory is wrong - equally useful.
+if (Get-Process LogonUI -ErrorAction SilentlyContinue) {
+    Write-Log 'Session LOCKED (LogonUI.exe present) - skipping, JVM not started'
+    exit 0
+}
+
 Write-Log 'TaskScheduler Triggered after 5 mins idle'
 Write-Log 'Starting JiggleOnce.jar'
 
