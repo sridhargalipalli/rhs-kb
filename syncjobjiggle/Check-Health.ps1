@@ -51,8 +51,23 @@ if ($task.Settings.MultipleInstances -eq 'IgnoreNew') { Pass "MultipleInstances 
 else { Warn "MultipleInstances = $($task.Settings.MultipleInstances)" }
 
 $info = Get-ScheduledTaskInfo -TaskName $TaskName
-if ($info.LastTaskResult -eq 0) { Pass "LastTaskResult = 0  (last run $($info.LastRunTime))" }
-else { Fail "LastTaskResult = $($info.LastTaskResult) (0x{0:X}) at $($info.LastRunTime)" -f $info.LastTaskResult }
+$codes = @{
+    267009     = '0x41301 currently running'
+    267011     = '0x41303 has not yet run'
+    267014     = '0x41306 terminated (hit ExecutionTimeLimit, or stopped)'
+    2147942401 = '0x80070002 file not found'
+    2147946720 = '0x800710E0 stopped rather than exited on its own'
+}
+$rc = [int64]$info.LastTaskResult
+$hex = '0x{0:X8}' -f $rc
+$txt = if ($codes.ContainsKey([int]$rc)) { $codes[[int]$rc] } else { 'see winerror.h' }
+if ($rc -eq 0) { Pass "LastTaskResult = 0  (last run $($info.LastRunTime))" }
+else { Fail "LastTaskResult = $rc  $hex  - $txt   (at $($info.LastRunTime))" }
+
+# A run that is still 'Running' well past the normal ~2 seconds is the hang signature.
+if ($task.State -eq 'Running' -and $info.LastRunTime -lt (Get-Date).AddMinutes(-1)) {
+    Warn ("An instance has been running since {0} - normal runs take ~2 s. If it wrote no log line, this is the hang; ExecutionTimeLimit should reap it." -f $info.LastRunTime)
+}
 
 # -------------------------------------------------------------- 2. the files
 Head "FILES"
