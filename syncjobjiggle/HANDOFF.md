@@ -89,6 +89,33 @@ on a locked desktop. Unconfirmed. The `TIMEOUT` lines the new launcher writes ar
 the evidence trail; correlate their timestamps against lock/unlock events
 (Security log 4800 = lock, 4801 = unlock).
 
+## Installed state as of 2026-08-28 14:26
+
+`C:\Tools\Sync` now holds:
+
+| File | Note |
+|---|---|
+| `run_jiggleonce.vbs` | Points at the `.ps1`. Waits, propagates the exit code. |
+| `run_jiggleonce.ps1` | The launcher. 60 s hard timeout, stale-JVM reaper, 1 MB rotation. |
+| `run_jiggleonce.bat` | Retired, still on disk as a fallback. Nothing calls it. |
+| `run_jiggleonce.vbs.bak` | The 08/20 VBS, kept as a rollback path. |
+| `CheckHealth.ps1` | The health check (note: no hyphen in the installed filename). |
+
+Verified live: run at 14:26:02 -> 14:26:04, `exit=0`, `LastTaskResult : 0`, and
+the Java process count was 0 both before and after, confirming the stale-JVM
+reaper matches only on `JiggleOnce.jar` and leaves the eClinicalWorks JVMs at
+`C:\eClinicalWorks\opendk11\bin\java.exe` alone.
+
+One bug was found and fixed during that install: `Start-Process -PassThru`
+returns a Process object whose `ExitCode` reads back as `$null` after the process
+exits unless `.Handle` is touched first. The launcher logged `exit=` and called
+`exit $null`, which Windows turns into 0 - silently reintroducing the failure
+blindness the whole exercise was meant to remove. Fixed by caching the handle
+before `WaitForExit`, with a `-1` fallback.
+
+**Task 1 of the original brief is therefore complete.** Only the investigation
+below remains.
+
 ## How to check it
 
 ```powershell
